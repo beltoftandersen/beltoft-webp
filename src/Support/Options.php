@@ -25,6 +25,15 @@ class Options {
 			'avif_enabled' => '1',
 			'webp_quality' => '85',
 			'avif_quality' => '70',
+
+			// License (see Licensing\License) — never posted by the main
+			// settings form, only ever written internally via save().
+			'license_key'             => '',
+			'license_status'          => '',
+			'license_expires'         => '',
+			'license_last_checked'    => '',
+			'license_remote_version'  => '',
+			'license_max_activations' => '',
 		);
 	}
 
@@ -37,11 +46,19 @@ class Options {
 	}
 
 	/**
-	 * Programmatic write helper for internal/CLI use. Bypasses the
+	 * Programmatic write helper for internal/CLI use (Licensing\License,
+	 * ad hoc scripts) — never fed raw request input directly. Bypasses the
 	 * registered Settings API sanitize filter (removed for the duration of
 	 * this call, same pattern as beltoft-media-offload's Options::save())
 	 * so a partial write here can't be silently reshaped by a sanitize
 	 * callback tuned for full form submissions.
+	 *
+	 * Deliberately does NOT call self::sanitize() on its own write: sanitize()
+	 * always pulls license_* fields from the currently-stored value (see its
+	 * docblock) precisely so a settings-form submit can't touch them — running
+	 * a save() write through sanitize() would immediately discard the very
+	 * license values this method exists to persist, since update_option()
+	 * hasn't happened yet when sanitize() reads "current".
 	 */
 	public static function save( array $values ) {
 		$merged = wp_parse_args( $values, self::all() );
@@ -54,7 +71,7 @@ class Options {
 			remove_filter( $sanitize_hook, $sanitize_cb, (int) $priority );
 		}
 
-		update_option( self::OPTION, self::sanitize( $merged ) );
+		update_option( self::OPTION, $merged );
 
 		if ( false !== $priority ) {
 			add_filter( $sanitize_hook, $sanitize_cb, (int) $priority );
@@ -117,6 +134,17 @@ class Options {
 
 		$out['webp_quality'] = isset( $input['webp_quality'] ) ? (string) min( 100, max( 1, absint( $input['webp_quality'] ) ) ) : $out['webp_quality'];
 		$out['avif_quality'] = isset( $input['avif_quality'] ) ? (string) min( 100, max( 1, absint( $input['avif_quality'] ) ) ) : $out['avif_quality'];
+
+		// License fields are deliberately never taken from $input, under any
+		// circumstance — the main settings form never includes them (so a
+		// normal submit must not silently wipe the license), and a crafted
+		// POST adding them must not be able to forge a license status either.
+		// Always keep whatever is currently stored; only save()'s filter-
+		// bypassed write path (used by Licensing\License) can change them.
+		$current = self::all();
+		foreach ( array( 'license_key', 'license_status', 'license_expires', 'license_last_checked', 'license_remote_version', 'license_max_activations' ) as $license_field ) {
+			$out[ $license_field ] = $current[ $license_field ];
+		}
 
 		return $out;
 	}

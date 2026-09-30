@@ -11,6 +11,9 @@ sitting right next to it — `photo.jpg` gets `photo.jpg.avif` and
 `photo.jpg.webp`. A `wp beltoft-webp backfill` command does the same for
 existing media.
 
+Fully works without any license key. A free key is optional and only
+unlocks WordPress's built-in automatic-update flow — see Licensing below.
+
 Delivery is handled entirely at the web-server level, not by this plugin:
 
 ```nginx
@@ -84,6 +87,27 @@ change, without a hard dependency on this plugin:
   backfill created files for attachments it already considers done.
   beltoft-media-offload listens for this and re-syncs.
 
+## Licensing
+
+Conversion, the backfill command, the Settings page, and everything else
+work fully without a license — a license is entirely optional here.
+
+The one thing it unlocks is WordPress's built-in plugin update flow
+(new-version notices, one-click update, "View details" in the Plugins
+screen), via a self-hosted updater checking beltoft.net — the same
+mechanism this codebase's other Beltoft plugins use. It's a free ($0)
+key: activating one sends the key and this site's domain to
+`https://beltoft.net` (this codebase's license server); a daily cron
+check re-validates it the same way. No key is included by default —
+request one and enter it under **Settings > Beltoft WebP** if you want
+automatic updates; without one, everything still works, you'd just
+update the plugin manually.
+
+Self-hosted updaters are against WordPress.org's plugin directory rules,
+so `wp plugin check` flags `plugin_updater_detected` here; that's expected
+and accepted for a plugin that's never distributed through wp.org, same
+as this codebase's other Pro plugins.
+
 ## Installation
 
 1. Copy this directory to `wp-content/plugins/beltoft-webp`.
@@ -108,7 +132,15 @@ its siblings, whichever formats they're in) or you delete them yourself.
 automatically. Run `wp beltoft-webp backfill --force` to rebuild every
 sibling at the new quality.
 
+**Do I need a license key?** No — the plugin fully works without one.
+A free key only enables WordPress's built-in automatic-update flow;
+skip it if you're fine updating manually.
+
 ## Changelog
+
+### 2.1.0
+- Added an optional, free ($0) license key (**Settings > Beltoft WebP**), activated against beltoft.net — the same self-hosted mechanism as this codebase's other Beltoft plugins. It only gates WordPress's built-in automatic-update flow; conversion, the backfill command, and everything else work fully without one, and no admin notice nags anyone who hasn't entered a key.
+- Fixed: `wp beltoft-webp backfill` checked staleness (and reported byte savings) against every format this plugin can produce, instead of only the formats actually enabled in settings. Disabling a format on the Settings page (added in 2.0.0) made every file look permanently stale on every future backfill run, re-converting the entire media library each time and firing the integration hooks needlessly. Corrects the 2.0.0 changelog's claim of "no functional change to the conversion logic itself" — this bug was introduced by that restructuring.
 
 ### 2.0.0
 - Restructured from a single file into a proper plugin (`src/` classes, Settings page, `uninstall.php`) — no functional change to the conversion logic itself.

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Beltoft WebP
  * Description:       Keeps .avif and .webp siblings next to every uploaded JPEG/PNG, so nginx serves the best format each browser accepts and the original to those that accept neither. Includes a backfill command.
- * Version:           2.0.0
+ * Version:           2.1.0
  * Requires at least: 6.2
  * Requires PHP:      8.0
  * Author:            Internal
@@ -30,23 +30,20 @@ spl_autoload_register(
 	}
 );
 
-define( 'BWEBP_VERSION', '2.0.0' );
+define( 'BWEBP_VERSION', '2.1.0' );
 define( 'BWEBP_FILE', __FILE__ );
 define( 'BWEBP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'BWEBP_BASENAME', plugin_basename( __FILE__ ) );
+define( 'BWEBP_LICENSE_SERVER', 'https://beltoft.net' );
 
-register_activation_hook(
-	__FILE__,
-	function () {
-		if ( false === get_option( \BeltoftWebp\Support\Options::OPTION, false ) ) {
-			add_option( \BeltoftWebp\Support\Options::OPTION, \BeltoftWebp\Support\Options::defaults() );
-		}
-	}
-);
+register_activation_hook( __FILE__, array( 'BeltoftWebp\\Support\\Installer', 'activate' ) );
+register_deactivation_hook( __FILE__, array( 'BeltoftWebp\\Support\\Installer', 'deactivate' ) );
 
 add_action(
 	'plugins_loaded',
 	function () {
+		\BeltoftWebp\Licensing\License::init();
+		\BeltoftWebp\Licensing\Updater::init();
 		\BeltoftWebp\AttachmentHooks::init();
 		if ( is_admin() ) {
 			\BeltoftWebp\Admin\SettingsPage::init();

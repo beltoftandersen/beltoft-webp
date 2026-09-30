@@ -2,6 +2,7 @@
 namespace BeltoftWebp\Cli;
 
 use BeltoftWebp\Converter;
+use BeltoftWebp\Support\Options;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -35,7 +36,13 @@ class BackfillCommand {
 		$src      = 0;
 		$out      = 0;
 
-		$formats = Converter::KNOWN_FORMATS;
+		// Only currently-enabled formats, avif-first — not Converter::KNOWN_FORMATS
+		// (every format this plugin can produce, regardless of settings). Using
+		// KNOWN_FORMATS here would mark every file stale forever after disabling
+		// a format (its sibling would never exist, so the staleness check below
+		// would never pass), and would report savings against whichever format
+		// happens to be listed first rather than the one the browser prefers.
+		$formats = Options::enabled_formats();
 
 		$it = new \RecursiveIteratorIterator(
 			new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS )
@@ -77,7 +84,7 @@ class BackfillCommand {
 				$src += filesize( $path );
 
 				// Report against the format the browser will actually prefer.
-				$best = $path . '.' . $formats[0];
+				$best = ! empty( $formats ) ? $path . '.' . $formats[0] : $path;
 				$out += file_exists( $best ) ? filesize( $best ) : filesize( $path );
 			} else {
 				++$rejected;
