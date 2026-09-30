@@ -17,17 +17,25 @@ unlocks WordPress's built-in automatic-update flow — see Licensing below.
 Delivery is handled entirely at the web-server level, not by this plugin:
 
 ```nginx
-map $http_accept $webp_suffix { default ""; "~*webp" ".webp"; }
-location ~* ^.+\.(png|jpe?g|gif)$ {
+# http {} level. The defaults are suffixes that never exist, so a missing
+# or unaccepted format falls through to the next candidate — an empty
+# default would make try_files hit the original first and skip WebP.
+map $http_accept $bwebp_avif { default ".no-avif"; "~*image/avif" ".avif"; }
+map $http_accept $bwebp_webp { default ".no-webp"; "~*image/webp" ".webp"; }
+
+location ~* \.(png|jpe?g)$ {
     add_header Vary Accept;
-    try_files $uri$webp_suffix $uri =404;
+    try_files $uri$bwebp_avif $uri$bwebp_webp $uri =404;
 }
 ```
 
-A request for `photo.jpg` gets `photo.jpg.webp` when the browser's Accept
-header lists `image/webp`, and falls through to the plain JPEG otherwise —
-no markup change, no `<picture>` element, nothing for CSS or other plugins
-to trip over, and `Vary: Accept` keeps shared caches honest.
+A request for `photo.jpg` gets `photo.jpg.avif` when the browser accepts
+AVIF and that sibling exists, otherwise `photo.jpg.webp` when it accepts
+WebP, otherwise the plain JPEG — no markup change, no `<picture>` element,
+nothing for CSS or other plugins to trip over, and `Vary: Accept` keeps
+shared caches honest. A WebP-only vhost (just the second map and
+`try_files $uri$bwebp_webp $uri`) works too; AVIF siblings then simply go
+unused, so turn AVIF off in settings rather than spend CPU on it.
 
 ### Why a plugin, not theme code
 
@@ -74,18 +82,80 @@ throttled front-page LCP from 12.6s to 5.0s and the shop from 4.4s to 1.7s.
 
 ## Integration with other plugins
 
-Two actions are fired for anything that wants to know when sibling files
-change, without a hard dependency on this plugin:
+Hooks for anything that wants to know when sibling files change, without
+a hard dependency on this plugin:
 
-- `beltoft_webp_file_converted( $path )` — after any conversion, upload or
-  backfill.
+- `beltoft_webp_file_converted( $path )` — after a sibling was actually
+  (re)written, from upload or backfill; not when everything was current.
 - `beltoft_webp_backfill_complete` — once, after a `wp beltoft-webp backfill`
-  run that changed at least one file. Backfill walks the filesystem
+  run that wrote at least one sibling. Backfill walks the filesystem
   directly and never fires WordPress's attachment hooks, so a plugin that
   only detects new sibling files via `wp_generate_attachment_metadata`
   (as beltoft-media-offload does) would otherwise never learn that
   backfill created files for attachments it already considers done.
   beltoft-media-offload listens for this and re-syncs.
+- `beltoft_webp_conversion_failed( $path, $format, $reason )` — when a
+  sibling could not be produced at all (unreadable source, encoder error),
+  as opposed to produced and discarded for not being smaller. Conversion
+  failures are otherwise silent: the site just keeps serving the original.
+  In WP-CLI they are also printed as warnings by backfill, and every
+  decision is logged with `--debug=beltoft-webp`.
+- Filter `beltoft_webp_backfill_excluded_dirs` — top-level `uploads/`
+  directories backfill never enters. Default: `woocommerce_uploads`,
+  `wc-logs`, `edd`, `gravity_forms`, `wpforms` (protected downloads, logs,
+  form submissions); hidden directories are always skipped.
+
+## Files, permissions and skip markers
+
+- Each sibling is encoded to a temporary file and renamed into place, so
+  nginx never serves a half-written image, and a sibling this process
+  can't write to (e.g. root-owned) is still replaced.
+- A sibling gets its source file's permission bits and, when running as
+  root (`wp --allow-root`), its owner and group. Whatever lets nginx read
+  the original then lets it read the sibling. Before 2.2.0 siblings were
+  hardcoded to 0640 and a root backfill left them root-owned, unreadable
+  to an nginx worker that could read the originals; backfill now repairs
+  such files on its next run.
+- When a sibling is deliberately not kept (not smaller than its source,
+  or an AVIF not smaller than its WebP), a tiny marker file
+  `photo.jpg.avif.skip` records that for this version of the source, so
+  backfill doesn't re-encode it on every run. Markers are removed with
+  their source and ignored by `--force`.
+- JPEG EXIF orientation is applied to the pixels before the metadata is
+  stripped, so siblings of camera originals aren't shown sideways.
+
+## Background conversion
+
+Outside WP-CLI, an upload (or thumbnail regeneration) only marks the
+attachment pending and queues a job: Action Scheduler when it's loaded
+(WooCommerce ships it), WP-Cron otherwise. The upload request no longer
+waits for AVIF/WebP encoding (measured on a 2400×1600 photo: 16.6s inline,
+5.9s queued), and until the job runs nginx simply serves the originals.
+Switch it off under **Settings > Beltoft WebP > Background conversion**
+to convert inline as before.
+
+- WP-CLI (`wp media regenerate`, `wp media import`, backfill) always
+  converts inline.
+- With beltoft-media-offload older than 1.6.0 it also stays inline: those
+  versions delete local files straight after offloading, which would
+  leave the job nothing to convert.
+- A job that never runs (stalled queue, WP-Cron not firing on a quiet
+  site) is picked up by the next `wp beltoft-webp backfill`, which runs
+  every pending attachment first. On low-traffic sites, a real system
+  cron calling WP-Cron keeps the delay short.
+- Deactivating the plugin drops queued jobs and pending marks.
+
+Hooks for other plugins (the beltoft-media-offload 1.6.0 contract):
+
+- Filter `beltoft_webp_conversion_pending( $pending, $attachment_id )` —
+  true from the moment the upload hook (priority 10) queues the
+  attachment until its job ends, including while queued but not started.
+- Action `beltoft_webp_attachment_conversion_finished( $attachment_id,
+  $success )` — when the job ends, successful or not, after the pending
+  mark is cleared. beltoft-media-offload uploads the new siblings and
+  completes the local delete it held back.
+- Filter `beltoft_webp_use_action_scheduler` — force WP-Cron by returning
+  false.
 
 ## Licensing
 
@@ -124,9 +194,19 @@ delivery is handled by the web server's Accept-header negotiation, not by
 this plugin. Nothing in the page's HTML changes.
 
 **What happens if I disable WebP or AVIF in settings?** New conversions
-skip that format. Existing sibling files aren't touched or removed — they
-keep being served until the source image is deleted (which removes all of
-its siblings, whichever formats they're in) or you delete them yourself.
+skip that format. Existing sibling files are left alone while they're
+current, and keep being served until the source image changes (a stale
+one is then removed, so an outdated picture is never served) or is deleted
+(which removes all of its siblings, whichever formats they're in).
+
+**I used another WebP converter before (e.g. EWWW Image Optimizer). Do its
+files still work?** Any `photo.jpg.webp` it made uses the same append
+naming, so nginx keeps serving it and this plugin treats it as current
+(it only rebuilds a sibling older than its source), repairs its
+permissions to match the source, and deletes it along with the source.
+Run `wp beltoft-webp backfill --force` if you'd rather re-encode them at
+this plugin's measured quality. Files named by replacing the extension
+(`photo.webp`) aren't seen by this plugin or by the nginx chain above.
 
 **I changed a quality setting — do existing images update?** Not
 automatically. Run `wp beltoft-webp backfill --force` to rebuild every
@@ -137,6 +217,25 @@ A free key only enables WordPress's built-in automatic-update flow;
 skip it if you're fine updating manually.
 
 ## Changelog
+
+### 2.3.0
+- Added background conversion (on by default, Settings > Beltoft WebP): uploads and thumbnail regenerations are queued with Action Scheduler, or WP-Cron without it, instead of encoding every size during the upload request. WP-CLI stays synchronous, and so does any site running beltoft-media-offload older than 1.6.0.
+- Added the `beltoft_webp_conversion_pending` filter answer and the `beltoft_webp_attachment_conversion_finished` action, so beltoft-media-offload 1.6.0+ holds back its "delete local files" until the siblings exist.
+- `wp beltoft-webp backfill` first runs any background jobs that never ran.
+- Fixed: backfill repaired permissions only on siblings of enabled formats, while nginx still serves an existing sibling of a disabled format. It now repairs every format.
+
+### 2.2.0
+- Fixed: siblings were hardcoded to mode 0640, and a `wp --allow-root` backfill left them root-owned, so an nginx worker that can read the originals could get a 403 for every AVIF/WebP-accepting browser, and PHP could never overwrite them (a regenerated thumbnail kept serving its old sibling). Siblings now copy their source's permissions (and owner/group when running as root), are written to a temp file and renamed into place, and backfill repairs existing ones.
+- Fixed: PNGs never took the GD WebP path, because `getimagesize()` never reports channels for PNGs — every PNG went through Imagick, whose WebP ignores quality on this build. Transparency is now read from the PNG header; palette PNGs are converted to truecolor for GD.
+- Fixed: a sibling rejected for not being smaller (or an AVIF not smaller than its WebP) looked stale forever, so every backfill re-encoded it, counted it as converted, and re-fired `beltoft_webp_file_converted` and `beltoft_webp_backfill_complete` (making beltoft-media-offload re-sync every run). A `.skip` marker now records the rejection, and both hooks only fire when a sibling was actually written.
+- Fixed: the documented nginx snippet only served WebP, so AVIF siblings were generated but never served. The readme now has a tested AVIF-first chain.
+- Fixed: reactivating the plugin re-activated a license the admin had deliberately deactivated; plugin deactivation no longer calls the license server when no license is active.
+- Fixed: WebP conversion required Imagick even though it goes through GD.
+- Fixed: JPEG EXIF orientation was stripped without being applied, so siblings of camera originals could show sideways.
+- Fixed: a stale sibling (source changed but not reconverted — format disabled, conversion switched off, or encoding failed) kept being served as the old picture; it is now removed.
+- Backfill skips protected/non-media upload directories (filter `beltoft_webp_backfill_excluded_dirs`) and hidden ones, and reports failures separately from "not smaller".
+- Added `beltoft_webp_conversion_failed` action; failures are printed by backfill and logged under `--debug=beltoft-webp`.
+- Corrected the WebP quality description on the Settings page and a code comment that contradicted the GD path.
 
 ### 2.1.0
 - Added an optional, free ($0) license key (**Settings > Beltoft WebP**), activated against beltoft.net — the same self-hosted mechanism as this codebase's other Beltoft plugins. It only gates WordPress's built-in automatic-update flow; conversion, the backfill command, and everything else work fully without one, and no admin notice nags anyone who hasn't entered a key.

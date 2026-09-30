@@ -23,31 +23,64 @@ class AttachmentHooks {
 	 * files to remote storage on the same filter needs its own hook at a later priority so
 	 * these siblings exist on disk before it looks — see beltoft-media-offload's
 	 * AttachmentHooks, priority 20, for the other half of that.
+	 *
+	 * Outside WP-CLI the actual encoding is normally queued (see Queue): this only marks
+	 * the attachment pending, which is also what tells beltoft-media-offload, at priority
+	 * 20, to hold back deleting the local files until the job has run.
 	 */
 	public static function on_generate_attachment_metadata( $metadata, $attachment_id ) {
-		if ( ! Options::is_enabled() ) {
+		$files = self::attachment_files( $attachment_id, $metadata );
+
+		if ( empty( $files ) ) {
 			return $metadata;
 		}
 
-		$original = get_attached_file( $attachment_id );
+		$enabled = Options::is_enabled();
 
-		if ( ! $original ) {
+		if ( $enabled && Queue::is_available() && Queue::enqueue( $attachment_id ) ) {
 			return $metadata;
 		}
 
-		Converter::convert_file( $original );
-
-		if ( ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
-			$dir = dirname( $original );
-
-			foreach ( $metadata['sizes'] as $size ) {
-				if ( ! empty( $size['file'] ) ) {
-					Converter::convert_file( $dir . '/' . $size['file'] );
-				}
+		foreach ( $files as $file ) {
+			if ( $enabled ) {
+				Converter::convert_file( $file );
+			} else {
+				// Not converting, but a regenerated size must not keep being served as
+				// its previous picture by an existing sibling.
+				Converter::discard_stale_siblings( $file );
 			}
 		}
 
 		return $metadata;
+	}
+
+	/**
+	 * Absolute paths of an attachment's attached file and every generated size.
+	 *
+	 * @param int        $attachment_id Attachment ID.
+	 * @param array|null $metadata      Attachment metadata (in-flight or saved).
+	 * @return string[]
+	 */
+	public static function attachment_files( $attachment_id, $metadata ) {
+		$original = get_attached_file( (int) $attachment_id );
+
+		if ( ! $original ) {
+			return array();
+		}
+
+		$files = array( $original );
+
+		if ( is_array( $metadata ) && ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
+			$dir = dirname( $original );
+
+			foreach ( $metadata['sizes'] as $size ) {
+				if ( ! empty( $size['file'] ) ) {
+					$files[] = $dir . '/' . $size['file'];
+				}
+			}
+		}
+
+		return array_values( array_unique( $files ) );
 	}
 
 	/**
@@ -65,8 +98,10 @@ class AttachmentHooks {
 		foreach ( Converter::KNOWN_FORMATS as $format ) {
 			$sibling = $file . '.' . $format;
 
-			if ( file_exists( $sibling ) ) {
-				wp_delete_file( $sibling );
+			foreach ( array( $sibling, $sibling . Converter::SKIP_SUFFIX ) as $leftover ) {
+				if ( file_exists( $leftover ) ) {
+					wp_delete_file( $leftover );
+				}
 			}
 		}
 

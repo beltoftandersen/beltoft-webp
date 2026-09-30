@@ -213,7 +213,10 @@ class License {
 	 */
 	public static function remote_deactivate() {
 		$key = Options::get( 'license_key' );
-		if ( empty( $key ) ) {
+
+		// Only an active license holds a slot; an operator-deactivated one (status '')
+		// already freed it, so skip the blocking round trip.
+		if ( empty( $key ) || ! self::is_active() ) {
 			return;
 		}
 
@@ -227,12 +230,17 @@ class License {
 	}
 
 	/**
-	 * Re-register this domain's activation after reactivation (the license
-	 * key survives deactivation, but the remote activation slot doesn't).
+	 * Re-register this domain's activation after plugin reactivation (the
+	 * license key and status survive plugin deactivation, but the remote
+	 * activation slot doesn't).
+	 *
+	 * Only when the license was active at the time: an empty status with a
+	 * stored key means the operator deactivated the license on purpose (see
+	 * deactivate()), and reactivating the plugin must not silently undo that.
 	 */
-	public static function reactivate_if_key_present() {
+	public static function reactivate_if_previously_active() {
 		$key = Options::get( 'license_key' );
-		if ( ! empty( $key ) ) {
+		if ( ! empty( $key ) && self::is_active() ) {
 			self::activate( $key );
 		}
 	}

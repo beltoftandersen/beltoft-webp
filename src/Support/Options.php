@@ -21,6 +21,7 @@ class Options {
 	public static function defaults() {
 		return array(
 			'enabled'      => '1',
+			'background'   => '1',
 			'webp_enabled' => '1',
 			'avif_enabled' => '1',
 			'webp_quality' => '85',
@@ -87,6 +88,10 @@ class Options {
 		return '1' === self::get( 'enabled' );
 	}
 
+	public static function is_background_enabled() {
+		return '1' === self::get( 'background' );
+	}
+
 	/**
 	 * @param string $format 'webp' or 'avif'.
 	 */
@@ -129,6 +134,7 @@ class Options {
 		}
 
 		$out['enabled']      = ! empty( $input['enabled'] ) ? '1' : '0';
+		$out['background']   = ! empty( $input['background'] ) ? '1' : '0';
 		$out['webp_enabled'] = ! empty( $input['webp_enabled'] ) ? '1' : '0';
 		$out['avif_enabled'] = ! empty( $input['avif_enabled'] ) ? '1' : '0';
 

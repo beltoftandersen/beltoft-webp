@@ -17,13 +17,17 @@ class Installer {
 			wp_schedule_event( time(), 'daily', 'bwebp_license_check' );
 		}
 
-		// Deactivating the plugin frees the license's activation slot on the
-		// server; re-register this domain on reactivation.
-		\BeltoftWebp\Licensing\License::reactivate_if_key_present();
+		// Deactivating the plugin frees an active license's slot on the server;
+		// re-register this domain on reactivation.
+		\BeltoftWebp\Licensing\License::reactivate_if_previously_active();
 	}
 
 	public static function deactivate() {
 		\BeltoftWebp\Licensing\License::remote_deactivate();
+
+		// Nothing will run queued jobs or answer the pending filter any more; clearing
+		// the marks lets beltoft-media-offload complete the local deletes it held back.
+		\BeltoftWebp\Queue::clear_all();
 		wp_clear_scheduled_hook( 'bwebp_license_check' );
 	}
 }

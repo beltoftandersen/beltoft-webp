@@ -117,12 +117,16 @@ class SettingsPage {
 						<td><input type="checkbox" id="bwebp_enabled" name="<?php echo esc_attr( Options::OPTION ); ?>[enabled]" value="1" <?php checked( '1', $options['enabled'] ); ?> /> <span class="description"><?php esc_html_e( 'Convert on upload and thumbnail regeneration. The WP-CLI backfill command works regardless of this setting.', 'beltoft-webp' ); ?></span></td>
 					</tr>
 					<tr>
+						<th scope="row"><label for="bwebp_background"><?php esc_html_e( 'Background conversion', 'beltoft-webp' ); ?></label></th>
+						<td><input type="checkbox" id="bwebp_background" name="<?php echo esc_attr( Options::OPTION ); ?>[background]" value="1" <?php checked( '1', $options['background'] ); ?> /> <span class="description"><?php esc_html_e( 'Convert uploads in a background job (Action Scheduler or WP-Cron) instead of during the upload request, so large images cannot time the upload out. Originals are served until the job has run. Stays synchronous in WP-CLI and alongside beltoft-media-offload older than 1.6.0.', 'beltoft-webp' ); ?></span></td>
+					</tr>
+					<tr>
 						<th scope="row"><label for="bwebp_webp_enabled"><?php esc_html_e( 'WebP', 'beltoft-webp' ); ?></label></th>
 						<td>
 							<input type="checkbox" id="bwebp_webp_enabled" name="<?php echo esc_attr( Options::OPTION ); ?>[webp_enabled]" value="1" <?php checked( '1', $options['webp_enabled'] ); ?> />
 							<label for="bwebp_webp_quality"><?php esc_html_e( 'Quality', 'beltoft-webp' ); ?></label>
 							<input type="number" min="1" max="100" step="1" class="small-text" id="bwebp_webp_quality" name="<?php echo esc_attr( Options::OPTION ); ?>[webp_quality]" value="<?php echo esc_attr( $options['webp_quality'] ); ?>" />
-							<p class="description"><?php esc_html_e( 'Default 85, chosen for this server\'s GD encoder — 65 measured well below the WebP default and 85 gave a measurable quality gain for the extra bytes. See readme for the full measurement.', 'beltoft-webp' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Default 85, encoded with GD (this server\'s ImageMagick ignores WebP quality) — 85 measured about 3 dB PSNR better than the encoder\'s default. See readme for the full measurement.', 'beltoft-webp' ); ?></p>
 						</td>
 					</tr>
 					<tr>
